@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/zhengxiaoyao0716/util/console"
-
 	"github.com/zhengxiaoyao0716/zcli/connect"
 )
 
