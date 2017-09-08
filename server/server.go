@@ -1,7 +1,6 @@
 package server
 
 import (
-	"container/list"
 	"fmt"
 	"log"
 	"net"
@@ -10,12 +9,12 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/zhengxiaoyao0716/util/console"
+
 	"github.com/zhengxiaoyao0716/util/cout"
 
 	"github.com/zhengxiaoyao0716/zcli/connect"
 )
-
-var conns *list.List
 
 // Handler .
 // If the return handler is nil, the next handler would be set to:
@@ -30,6 +29,9 @@ type Command struct {
 	Handler func(connect.Conn) (string, Handler)
 }
 
+// In is the tip for user input.
+var In = console.In
+
 // Cmds .
 var Cmds = map[string]Command{
 	"sign": {
@@ -40,11 +42,11 @@ var Cmds = map[string]Command{
 				000777,
 				"Sign in.",
 				func(connect.Conn) (string, Handler) {
-					return "Name: ", func(parsed *string, name string) (string, Handler) {
-						return "Password: \033[8m", func(parsed *string, password string) (string, Handler) {
+					return cout.Yes("Name: "), func(parsed *string, name string) (string, Handler) {
+						return cout.Yes("Password: ") + "\033[8m", func(parsed *string, password string) (string, Handler) {
 							// TODO login
 							*parsed = ""
-							return "\033[28mSigned in: " + name + " " + password + "\n> ", nil
+							return "\033[28mSigned in: " + name + " " + password + "\n" + In, nil
 						}
 					}
 				},
@@ -53,10 +55,10 @@ var Cmds = map[string]Command{
 				000077, // M & 000700 == denied, guests who have not sign cannot sign out.
 				"Sign out.",
 				func(connect.Conn) (string, Handler) {
-					return "Confirm to logout? ", func(parsed *string, confirm string) (string, Handler) {
+					return cout.Yes("Confirm to logout? "), func(parsed *string, confirm string) (string, Handler) {
 						// TODO logout
 						*parsed = ""
-						return "Signed out.\n> ", nil
+						return "Signed out.\n" + In, nil
 					}
 				},
 			},
@@ -64,11 +66,11 @@ var Cmds = map[string]Command{
 				000777,
 				"Sign up account.",
 				func(connect.Conn) (string, Handler) {
-					return "Name: ", func(parsed *string, name string) (string, Handler) {
-						return "Password: \033[8m", func(parsed *string, password string) (string, Handler) {
+					return cout.Yes("Name: "), func(parsed *string, name string) (string, Handler) {
+						return cout.Yes("Password: ") + "\033[8m", func(parsed *string, password string) (string, Handler) {
 							// TODO new account
 							*parsed = ""
-							return "\033[28mSigned up: " + name + " " + password + "\n> ", nil
+							return "\033[28mSigned up: " + name + " " + password + "\n" + In, nil
 						}
 					}
 				},
@@ -83,23 +85,36 @@ var Cmds = map[string]Command{
 				07,
 				"Manage connected cli-clients.",
 				ParseCmd(map[string]Command{
-					"ls": {
-						07,
-						"List connected cli-clients.",
+					"ps": {
+						04,
+						"List connecting clients.",
 						func(connect.Conn) (string, Handler) {
-							ls := []string{
-								fmt.Sprintf("--%-3s---%-25s---%-19s--", strings.Repeat("-", 3), strings.Repeat("-", 25), strings.Repeat("-", 19)),
-								fmt.Sprintf("| %-3s | %-25s | %-19s |", "ID", "ADDRESS", "TIME"),
-								fmt.Sprintf("| %-3s---%-25s---%-19s |", strings.Repeat("-", 3), strings.Repeat("-", 25), strings.Repeat("-", 19)),
+							return connect.Status() + "\n" + In, nil
+						},
+					},
+					"kill": {
+						01,
+						"Kill a connecting client.",
+						func(connect.Conn) (string, Handler) {
+							return "Ids: ", func(parsed *string, ids string) (string, Handler) {
+								ms := []string{}
+								for _, field := range strings.Fields(ids) {
+									id, err := strconv.Atoi(field)
+									if err != nil {
+										ms = append(ms, "invalid type of input, field: "+cout.Err(field))
+									}
+									c, err := connect.Get(id)
+									if err != nil {
+										ms = append(ms, err.Error())
+									}
+									c.Send("/sys/close", "administrator kill the connect.")
+									if err := c.Close(); err != nil {
+										ms = append(ms, err.Error())
+									}
+									ms = append(ms, "success killed "+cout.Info("%d", id))
+								}
+								return strings.Join(ms, "\n") + "\n" + In, nil
 							}
-							id := 0
-							for it := conns.Front(); it != nil; it = it.Next() {
-								id++
-								conn := it.Value.(connect.Conn)
-								ls = append(ls, fmt.Sprintf("| %03d %s", id, conn.String()))
-							}
-							ls = append(ls, ls[0])
-							return strings.Join(ls, "\n") + "\n> ", nil
 						},
 					},
 				}),
@@ -134,20 +149,23 @@ func ParseCmd(cmds map[string]Command) func(connect.Conn) (string, Handler) {
 				}
 				_, handler := handler(conn)
 				return fmt.Sprintf(
-					"Usage: %s%s <%s>\n\nCommands list:\n%s\n> ", Name, cout.Info(*parsed), cout.Info("Command"), strings.Join(usages, "\n"),
+					"Usage: %s%s <%s>\n\nCommands list:\n%s\n"+In, Name, cout.Info(*parsed), cout.Info("Command"), strings.Join(usages, "\n"),
 				), handler
 			case "":
 				*parsed = ""
-				return fmt.Sprint("<<<\n> "), nil
+				return cout.Yes("<<<\n") + In, nil
 			default:
 				if cmd, ok := cmds[args[0]]; ok {
 					*parsed += " " + args[0]
 					output, handler := cmd.Handler(conn)
 					if len(args) > 1 {
-						return handler(parsed, args[1])
+						if handler != nil {
+							return handler(parsed, args[1])
+						}
+						output = fmt.Sprintf("redundant arguments: %s\n%s", cout.Warn(args[1]), output)
 					}
 					if output == "" {
-						output = cmd.Usage + "\n> "
+						output = cmd.Usage + "\n" + In
 					}
 					return output, handler
 				}
@@ -157,7 +175,7 @@ func ParseCmd(cmds map[string]Command) func(connect.Conn) (string, Handler) {
 					Name, cout.Info(*parsed), cout.Info(strings.Join(linked, " ")),
 				)
 				return fmt.Sprintf(
-					"\a%s: invalid option: '%s' for command '%s'.\n\n%s\n> ",
+					"\a%s: invalid option: '%s' for command '%s'.\n\n%s\n"+In,
 					Name, cout.Err(args[0]), Name+*parsed, usage,
 				), handler
 			}
@@ -178,7 +196,6 @@ func Start(name, address string) error {
 		return err
 	}
 
-	conns = list.New()
 	go func(l net.Listener) {
 		for {
 			conn, err := l.Accept()
@@ -188,11 +205,7 @@ func Start(name, address string) error {
 			}
 
 			go func(c connect.Conn) {
-				ele := conns.PushFront(c)
-				defer func() {
-					c.Close()
-					conns.Remove(ele)
-				}()
+				defer c.Close()
 
 				var parsed string
 				_, handler := ParseCmd(Cmds)(c)

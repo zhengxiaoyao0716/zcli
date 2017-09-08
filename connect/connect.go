@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zhengxiaoyao0716/util/cout"
@@ -19,6 +21,7 @@ var (
 // Conn .
 type Conn struct {
 	net.Conn
+	id   int
 	time string
 }
 
@@ -103,13 +106,70 @@ func (c *Conn) Server(handles map[string]func(data string) error) error {
 	}
 }
 
+var (
+	conns = map[int]Conn{}
+	id    = 0
+	// lock  = make(chan bool, 1)
+	mutex sync.Mutex // witch is better?
+)
+
 // New .
-func New(c net.Conn) Conn {
-	return Conn{c, time.Now().String()[0:19]}
+func New(conn net.Conn) Conn {
+	// lock <- true
+	mutex.Lock()
+	// defer func() { <-lock }()
+	defer mutex.Unlock()
+
+	if id > 2*len(conns) { // fill the vacant.
+		id = 0
+	}
+	for _, ok := conns[id]; ok; _, ok = conns[id] {
+		id++
+	}
+	c := Conn{conn, id, time.Now().String()[0:19]}
+	conns[c.id] = c
+	return c
 }
 
-func (c *Conn) String() string {
-	return fmt.Sprintf("| %s | %s |", cout.Info("%-25s", c.RemoteAddr()), c.time)
+// Close .
+func (c Conn) Close() error {
+	delete(conns, c.id)
+	return c.Conn.Close()
+}
+
+// Get .
+func Get(id int) (Conn, error) {
+	c, ok := conns[id]
+	if !ok {
+		return c, errors.New("no conn found, id: " + cout.Err("%-3d", id))
+	}
+	return c, nil
+}
+
+type connSlice []Conn
+
+func (p connSlice) Len() int           { return len(p) }
+func (p connSlice) Less(i, j int) bool { return p[i].time > p[j].time }
+func (p connSlice) Swap(i, j int)      { p[i], p[j] = p[j], p[i] }
+
+// Status .
+func Status() string {
+	var sorted connSlice
+	for _, c := range conns {
+		sorted = append(sorted, c)
+	}
+	sort.Sort(sorted)
+
+	ls := []string{
+		fmt.Sprintf("--%-3s---%-25s---%-19s--", strings.Repeat("-", 3), strings.Repeat("-", 25), strings.Repeat("-", 19)),
+		fmt.Sprintf("| %-3s | %-25s | %-19s |", "ID", "ADDRESS", "TIME"),
+		fmt.Sprintf("| %-3s---%-25s---%-19s |", strings.Repeat("-", 3), strings.Repeat("-", 25), strings.Repeat("-", 19)),
+	}
+	for _, c := range sorted {
+		ls = append(ls, fmt.Sprintf("| %3d | %s | %s |", c.id, cout.Info("%-25s", c.RemoteAddr()), c.time))
+	}
+	ls = append(ls, ls[0])
+	return strings.Join(ls, "\n")
 }
 
 func init() {

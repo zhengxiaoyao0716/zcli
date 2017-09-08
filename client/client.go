@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/zhengxiaoyao0716/util/cout"
+
 	"github.com/zhengxiaoyao0716/util/console"
 	"github.com/zhengxiaoyao0716/zcli/connect"
 )
@@ -24,7 +26,7 @@ func reader(r io.Reader) {
 }
 
 // Start .
-func Start(address string) error {
+func Start(address, cmds string) error {
 	network := "tcp"
 	if strings.HasSuffix(address, ".sock") {
 		network = "unix"
@@ -71,6 +73,17 @@ func Start(address string) error {
 		return err
 	}
 	for check := ""; check != "sync"; check = <-wait {
+	}
+
+	if cmds != "" {
+		cout.Print(console.In)
+		for _, cmd := range strings.Split(cmds, ";") {
+			console.Log(cmd)
+			c.Send("/usr/cmd", cmd)
+			cout.Print(<-wait)
+		}
+		console.Log(cout.Warn("^C"))
+		return nil
 	}
 
 	console.CatchInterrupt(func() { c.Send("/sys/close", "") })
