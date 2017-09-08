@@ -80,7 +80,7 @@ func Start(address, cmds string) error {
 		for _, cmd := range strings.Split(cmds, ";") {
 			console.Log(cmd)
 			c.Send("/usr/cmd", cmd)
-			cout.Print(<-wait)
+			cout.Print(<-wait) // echo all middle step result.
 		}
 		console.Log(cout.Warn("^C"))
 		return nil
@@ -89,10 +89,14 @@ func Start(address, cmds string) error {
 	console.CatchInterrupt(func() { c.Send("/sys/close", "") })
 
 	c.Send("/usr/cmd", "--help")
+	tip := <-wait
 	for {
-		tip := <-wait
-		if err := c.Send("/usr/cmd", console.ReadLine(tip)); err != nil {
-			log.Println(err)
+		cmds := console.ReadLine(tip)
+		for _, cmd := range strings.Split(cmds, ";") {
+			if err := c.Send("/usr/cmd", cmd); err != nil {
+				log.Println(err)
+			}
+			tip = <-wait // middle step result would be silence.
 		}
 	}
 }
