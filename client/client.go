@@ -1,6 +1,7 @@
 package client
 
 import (
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -26,14 +27,18 @@ func reader(r io.Reader) {
 }
 
 // Start .
-func Start(address, cmds string) error {
+func Start(args []string) {
+	address := flag.String("addr", "", "Service address witch to be connected.")
+	cmds := flag.String("c", "", "Commands that would send to server directly.")
+	flag.CommandLine.Parse(args)
+
 	network := "tcp"
-	if strings.HasSuffix(address, ".sock") {
+	if strings.HasSuffix(*address, ".sock") {
 		network = "unix"
 	}
-	conn, err := net.Dial(network, address)
+	conn, err := net.Dial(network, *address)
 	if err != nil {
-		return err
+		log.Fatalln(err)
 	}
 	c := connect.New(conn)
 	defer c.Close()
@@ -54,10 +59,6 @@ func Start(address, cmds string) error {
 				wait <- "sync"
 				return nil
 			},
-			"/sys/pong": func(data string) error {
-				fmt.Println(data)
-				return nil
-			},
 			"/usr/cmd": func(data string) error {
 				wait <- data
 				return nil
@@ -70,20 +71,20 @@ func Start(address, cmds string) error {
 
 	// sync buf size
 	if err := c.Send("/sys/buf/size/sync", ""); err != nil {
-		return err
+		log.Fatalln(err)
 	}
 	for check := ""; check != "sync"; check = <-wait {
 	}
 
-	if cmds != "" {
+	if *cmds != "" {
 		cout.Print(console.In)
-		for _, cmd := range strings.Split(cmds, ";") {
+		for _, cmd := range strings.Split(*cmds, ";") {
 			console.Log(cmd)
 			c.Send("/usr/cmd", cmd)
 			cout.Print(<-wait) // echo all middle step result.
 		}
 		console.Log(cout.Warn("^C"))
-		return nil
+		return
 	}
 
 	console.CatchInterrupt(func() { c.Send("/sys/close", "") })

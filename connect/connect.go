@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zhengxiaoyao0716/util/console"
+
 	"github.com/zhengxiaoyao0716/util/cout"
 )
 
@@ -18,11 +20,53 @@ var (
 	BufSize int
 )
 
+// Mode [UNUSED:000][UNUSED:000][GUEST:000][USER:000][ROOT:000], 000:rwx, r:read, w:write, x:exec,
+type Mode int16
+
+// Emulate of Mode
+const (
+	ModeRoot Mode = 07 << (3 * iota)
+	ModeUser
+	ModeGuest
+
+	ModeRx Mode = 01 << (iota - 3)
+	ModeRw
+	ModeRr
+	ModeUx
+	ModeUw
+	ModeUr
+	ModeGx
+	ModeGw
+	ModeGr
+
+	ModeAll = 0777 // All identities, include Guest, User, Root
+	ModeReg = 0077 // Only identities who registered, User or Root
+	ModeBan = 0000 // Identity who has nothing access permission.
+)
+
 // Conn .
 type Conn struct {
 	net.Conn
+	mode *Mode
 	id   int
 	time string
+}
+
+// GetMode .
+func (c *Conn) GetMode(ms ...Mode) Mode {
+	mode := *c.mode
+	for _, m := range ms {
+		mode = mode & m
+	}
+	return mode
+}
+
+// SetMode .
+func (c *Conn) SetMode(mode Mode, ms ...Mode) {
+	for _, m := range ms {
+		mode = mode & m
+	}
+	*c.mode = mode
 }
 
 // Read .
@@ -126,7 +170,8 @@ func New(conn net.Conn) Conn {
 	for _, ok := conns[id]; ok; _, ok = conns[id] {
 		id++
 	}
-	c := Conn{conn, id, time.Now().String()[0:19]}
+	mode := ModeGuest
+	c := Conn{conn, &mode, id, time.Now().String()[0:19]}
 	conns[c.id] = c
 	return c
 }
@@ -153,7 +198,7 @@ func (p connSlice) Less(i, j int) bool { return p[i].time > p[j].time }
 func (p connSlice) Swap(i, j int)      { p[i], p[j] = p[j], p[i] }
 
 // Status .
-func Status() string {
+func Status(marks ...Conn) string {
 	var sorted connSlice
 	for _, c := range conns {
 		sorted = append(sorted, c)
@@ -161,12 +206,26 @@ func Status() string {
 	sort.Sort(sorted)
 
 	ls := []string{
-		fmt.Sprintf("--%-3s---%-25s---%-19s--", strings.Repeat("-", 3), strings.Repeat("-", 25), strings.Repeat("-", 19)),
-		fmt.Sprintf("| %-3s | %-25s | %-19s |", "ID", "ADDRESS", "TIME"),
-		fmt.Sprintf("| %-3s---%-25s---%-19s |", strings.Repeat("-", 3), strings.Repeat("-", 25), strings.Repeat("-", 19)),
+		fmt.Sprintf("--%+3s---%-25s---%-19s---%-5s--", strings.Repeat("-", 3), strings.Repeat("-", 25), strings.Repeat("-", 19), strings.Repeat("-", 5)),
+		fmt.Sprintf("| %+3s | %-25s | %-19s | %-5s |", "ID", "ADDRESS", "TIME", "MODE"),
+		fmt.Sprintf("| %+3s---%-25s---%-19s---%-5s |", strings.Repeat("-", 3), strings.Repeat("-", 25), strings.Repeat("-", 19), strings.Repeat("-", 5)),
+	}
+	markSet := map[int]bool{}
+	for _, c := range marks {
+		markSet[c.id] = true
 	}
 	for _, c := range sorted {
-		ls = append(ls, fmt.Sprintf("| %3d | %s | %s |", c.id, cout.Info("%-25s", c.RemoteAddr()), c.time))
+		if _, ok := markSet[c.id]; ok {
+			ls = append(ls, fmt.Sprintf(
+				console.In+"%s | %s | %s | %s |",
+				cout.Yes("%3d", c.id),
+				cout.Yes("%-25s", c.RemoteAddr()),
+				cout.Yes(c.time),
+				cout.Yes("%05o", c.mode)),
+			)
+		} else {
+			ls = append(ls, fmt.Sprintf("| %3d | %s | %s | %05o |", c.id, cout.Info("%-25s", c.RemoteAddr()), c.time, c.mode))
+		}
 	}
 	ls = append(ls, ls[0])
 	return strings.Join(ls, "\n")
