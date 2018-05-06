@@ -186,7 +186,7 @@ func (c Conn) Close() error {
 func Get(id int) (Conn, error) {
 	c, ok := conns[id]
 	if !ok {
-		return c, errors.New("no conn found, id: " + cout.Err("%-3d", id))
+		return c, errors.New("connect not found, id: " + cout.Err("%-3d", id))
 	}
 	return c, nil
 }
@@ -221,7 +221,7 @@ func Status(marks ...Conn) string {
 				cout.Yes("%3d", c.id),
 				cout.Yes("%-25s", c.RemoteAddr()),
 				cout.Yes(c.time),
-				cout.Yes("%05o", c.mode)),
+				cout.Yes("%05o", *c.mode)),
 			)
 		} else {
 			ls = append(ls, fmt.Sprintf("| %3d | %s | %s | %05o |", c.id, cout.Info("%-25s", c.RemoteAddr()), c.time, c.mode))

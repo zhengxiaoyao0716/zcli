@@ -40,11 +40,15 @@ var Cmds = map[string]Command{
 				connect.ModeGuest,
 				"Sign in.",
 				func(c connect.Conn) (string, Handler) {
-					return cout.Yes("appName: "), func(parsed *string, name string) (string, Handler) {
+					return cout.Yes("Account: "), func(parsed *string, name string) (string, Handler) {
 						return cout.Yes("Password: ") + "\033[8m", func(parsed *string, password string) (string, Handler) {
 							// TODO login
 							*parsed = ""
-							c.SetMode(connect.ModeUser)
+							if name == "root" {
+								c.SetMode(connect.ModeRoot)
+							} else {
+								c.SetMode(connect.ModeUser)
+							}
 							return fmt.Sprintf("\033[28mSigned in: %s, mode: %05o\n"+In, name, c.GetMode()), nil
 						}
 					}
@@ -71,7 +75,7 @@ var Cmds = map[string]Command{
 				connect.ModeGuest,
 				"Sign up account.",
 				func(connect.Conn) (string, Handler) {
-					return cout.Yes("appName: "), func(parsed *string, name string) (string, Handler) {
+					return cout.Yes("Account: "), func(parsed *string, name string) (string, Handler) {
 						return cout.Yes("Password: ") + "\033[8m", func(parsed *string, password string) (string, Handler) {
 							return cout.Yes("\033[28mRepeat: ") + "\033[8m", func(parsed *string, repeat string) (string, Handler) {
 								if repeat != password {
@@ -114,13 +118,16 @@ var Cmds = map[string]Command{
 										ms = append(ms, "invalid type of input, field: "+cout.Err(field))
 									}
 									c, err := connect.Get(id)
-									if err != nil {
+									if err != nil { // not found
 										ms = append(ms, err.Error())
+										continue
 									}
 									c.Send("/sys/close", "administrator kill the connect.")
-									if err := c.Close(); err != nil {
+									if err := c.Close(); err != nil { // failed to killed
 										ms = append(ms, err.Error())
+										continue
 									}
+									// succeed
 									ms = append(ms, "success killed "+cout.Info("%d", id))
 								}
 								return strings.Join(ms, "\n") + "\n" + In, nil
@@ -139,6 +146,7 @@ var CheckConn = func(c connect.Conn) {
 	if err != nil {
 		return
 	}
+	// TODO config ban list
 	if _, ok := map[string]bool{
 		"some.ip.to.ban": true,
 	}[host]; ok {
@@ -240,8 +248,9 @@ func Start(name, address string) error {
 				defer c.Close()
 				CheckConn(c)
 
+				_, headHandler := ParseCmd(Cmds)(c)
 				var parsed string
-				_, handler := ParseCmd(Cmds)(c)
+				handler := headHandler
 
 				if err := c.Server(map[string]func(string) error{
 					"/sys/close": func(string) error {
@@ -254,7 +263,7 @@ func Start(name, address string) error {
 					"/usr/cmd": func(input string) error {
 						result, next := handler(&parsed, input)
 						if next == nil {
-							_, next = ParseCmd(Cmds)(c)
+							next = headHandler
 							if parsed != "" {
 								li := strings.LastIndex(parsed, " ")
 								if li == -1 {
@@ -262,7 +271,9 @@ func Start(name, address string) error {
 								}
 								input = strings.TrimSpace(parsed[0:li])
 								parsed = ""
-								_, next = next(&parsed, input)
+								if input != "" {
+									_, next = headHandler(&parsed, input)
+								}
 							}
 						}
 						handler = next
